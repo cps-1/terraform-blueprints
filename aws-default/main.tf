@@ -61,7 +61,7 @@ module "eks" {
   version = "~> 20.11"
 
   cluster_name                   = local.name
-  cluster_version                = "1.30"
+  cluster_version                = "1.34"
   cluster_endpoint_public_access = true
 
   # Give the Terraform identity admin access to the cluster
@@ -74,7 +74,7 @@ module "eks" {
   eks_managed_node_groups = {
     main = {
       ami_type       = "AL2023_x86_64_STANDARD"
-      instance_types = ["t3.large"]
+      instance_types = ["t3.xlarge"]
 
       min_size     = 1
       max_size     = 3
@@ -102,7 +102,7 @@ module "eks" {
 
 module "eks_blueprints_addons" {
   source  = "aws-ia/eks-blueprints-addons/aws"
-  version = "~> 1.16"
+  version = "~> 1.22"
 
   cluster_name      = module.eks.cluster_name
   cluster_endpoint  = module.eks.cluster_endpoint
@@ -127,10 +127,37 @@ module "eks_blueprints_addons" {
   enable_ingress_nginx = true
   ingress_nginx = {
     name          = "ingress-nginx"
-    chart_version = "4.11.3"
+    chart_version = "4.13.0"
     repository    = "https://kubernetes.github.io/ingress-nginx"
     namespace     = "ingress-nginx"
+    values = [
+      <<-EXTRA_VALUES
+      controller:
+        service:
+          externalTrafficPolicy: Local
+          annotations:
+            service.beta.kubernetes.io/aws-load-balancer-name: "${local.name}-public-lb"
+            service.beta.kubernetes.io/aws-load-balancer-type: "external"
+            service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+            service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
+            service.beta.kubernetes.io/load-balancer-source-ranges: 0.0.0.0/0
+          loadBalancerClass: service.k8s.aws/nlb
+    EXTRA_VALUES
+    ]
   }
+
+  enable_aws_load_balancer_controller = true
+  aws_load_balancer_controller = {
+    chart_version = "1.13.3"
+    set = [
+      {
+        name  = "vpcId"
+        value = module.vpc.vpc_id
+      }
+    ]
+  }
+
+  enable_aws_efs_csi_driver = true
 }
 
 ################################################################################
@@ -160,11 +187,6 @@ resource "kubernetes_annotations" "gp2" {
 resource "kubernetes_storage_class_v1" "gp3" {
   metadata {
     name = "gp3"
-
-    annotations = {
-      # Annotation to set gp3 as default storage class
-      "storageclass.kubernetes.io/is-default-class" = "true"
-    }
   }
 
   storage_provisioner    = "ebs.csi.aws.com"
@@ -176,6 +198,31 @@ resource "kubernetes_storage_class_v1" "gp3" {
     fsType    = "ext4"
     type      = "gp3"
   }
+
+  depends_on = [
+    module.eks_blueprints_addons
+  ]
+}
+
+
+resource "kubernetes_storage_class_v1" "efs" {
+  metadata {
+    name = "efs"
+    annotations = {
+      "storageclass.kubernetes.io/is-default-class" = "true"
+    }
+  }
+
+  storage_provisioner = "efs.csi.aws.com"
+  parameters = {
+    provisioningMode = "efs-ap" # Dynamic provisioning
+    fileSystemId     = module.efs.id
+    directoryPerms   = "700"
+  }
+
+  mount_options = [
+    "iam"
+  ]
 
   depends_on = [
     module.eks_blueprints_addons
@@ -221,6 +268,28 @@ module "ebs_csi_driver_irsa" {
     main = {
       provider_arn               = module.eks.oidc_provider_arn
       namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
+    }
+  }
+}
+
+module "efs" {
+  source  = "terraform-aws-modules/efs/aws"
+  version = "~> 1.1"
+
+  creation_token = local.name
+  name           = local.name
+
+  # Mount targets / security group
+  mount_targets = {
+    for k, v in zipmap(local.azs, module.vpc.private_subnets) : k => { subnet_id = v }
+  }
+  security_group_description = "${local.name} EFS security group"
+  security_group_vpc_id      = module.vpc.vpc_id
+  security_group_rules = {
+    vpc = {
+      # relying on the defaults provided for EFS/NFS (2049/TCP + ingress)
+      description = "NFS ingress from VPC private subnets"
+      cidr_blocks = module.vpc.private_subnets_cidr_blocks
     }
   }
 }
