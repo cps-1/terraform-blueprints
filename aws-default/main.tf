@@ -46,7 +46,7 @@ data "aws_availability_zones" "available" {
 
 locals {
   name   = var.eks_cluster_name
-  region = "us-west-2"
+  region = var.aws_region
 
   vpc_cidr = "10.0.0.0/16"
   azs      = slice(data.aws_availability_zones.available.names, 0, 2)
