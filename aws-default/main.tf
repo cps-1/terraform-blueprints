@@ -156,8 +156,6 @@ module "eks_blueprints_addons" {
       }
     ]
   }
-
-  enable_aws_efs_csi_driver = true
 }
 
 ################################################################################
@@ -187,6 +185,9 @@ resource "kubernetes_annotations" "gp2" {
 resource "kubernetes_storage_class_v1" "gp3" {
   metadata {
     name = "gp3"
+    annotations = {
+      "storageclass.kubernetes.io/is-default-class" = "true"
+    }
   }
 
   storage_provisioner    = "ebs.csi.aws.com"
@@ -198,31 +199,6 @@ resource "kubernetes_storage_class_v1" "gp3" {
     fsType    = "ext4"
     type      = "gp3"
   }
-
-  depends_on = [
-    module.eks_blueprints_addons
-  ]
-}
-
-
-resource "kubernetes_storage_class_v1" "efs" {
-  metadata {
-    name = "efs"
-    annotations = {
-      "storageclass.kubernetes.io/is-default-class" = "true"
-    }
-  }
-
-  storage_provisioner = "efs.csi.aws.com"
-  parameters = {
-    provisioningMode = "efs-ap" # Dynamic provisioning
-    fileSystemId     = module.efs.id
-    directoryPerms   = "700"
-  }
-
-  mount_options = [
-    "iam"
-  ]
 
   depends_on = [
     module.eks_blueprints_addons
@@ -272,24 +248,3 @@ module "ebs_csi_driver_irsa" {
   }
 }
 
-module "efs" {
-  source  = "terraform-aws-modules/efs/aws"
-  version = "~> 1.1"
-
-  creation_token = local.name
-  name           = local.name
-
-  # Mount targets / security group
-  mount_targets = {
-    for k, v in zipmap(local.azs, module.vpc.private_subnets) : k => { subnet_id = v }
-  }
-  security_group_description = "${local.name} EFS security group"
-  security_group_vpc_id      = module.vpc.vpc_id
-  security_group_rules = {
-    vpc = {
-      # relying on the defaults provided for EFS/NFS (2049/TCP + ingress)
-      description = "NFS ingress from VPC private subnets"
-      cidr_blocks = module.vpc.private_subnets_cidr_blocks
-    }
-  }
-}
