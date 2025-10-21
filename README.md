@@ -1,6 +1,6 @@
 # Cloud Programming Shell (CPS1) Terraform blueprints
 
-[Cloud Programming Shell (CPS)1](https://cps1.tech) is a Cloud Development Environment (CDE) on your Kubernetes that lets Devs launch environments on demand while Ops avoids tickets and keeps compute usage and security under control.
+[Cloud Programming Shell (CPS1)](https://cps1.tech) is a Cloud Development Environment (CDE) on your Kubernetes that lets Devs launch environments on demand while Ops avoids tickets and keeps compute usage and security under control.
 
 This repository provides Terraform blueprints to help provision Kubernetes clusters on various cloud providers, ready to deploy CPS1. It is a starting point for DevOps engineers, platform engineers, and SREs.
 
