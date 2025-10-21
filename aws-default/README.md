@@ -1,3 +1,42 @@
-# AWS EKS with 
+# AWS Default
 
-Basic EKS cluster with 1 to 3 nodes.
+Module Overview:
+- An EKS cluster with a managed node group.
+- Common EKS addons (cert-manager, ingress-nginx, AWS Load Balancer Controller, EBS CSI driver via IRSA).
+- StorageClasses and small Kubernetes resources required by the addons.
+- A VPC with public and private subnets (NAT gateway for private outbound access).
+- This deployment will incur AWS charges (EKS control plane, EC2 nodes, NAT gateway, ELBs, EBS volumes). Review costs before applying.
+
+### Prerequisites
+
+- Terraform (>= 1.x)
+- AWS CLI installed and configured with credentials for the target account
+- kubectl and helm for interacting with the created cluster
+- Local environment able to run `aws eks get-token` (providers use `exec` to authenticate to the cluster)
+
+### Required variables
+Provide values via `terraform.tfvars` or `-var` arguments. Example minimal `terraform.tfvars`:
+
+```hcl
+aws_region       = "us-west-2"
+eks_cluster_name = "my-cps1-cluster"
+eks_admins       = ["arn:aws:iam::123456789012:user/admin"]
+```
+
+Adjust values for your environment. `eks_admins` should be a list of ARNs that will be granted cluster admin access.
+
+### Example usage
+
+```bash
+export AWS_PROFILE=your-profile  # or configure env vars
+
+terraform init
+terraform plan
+terraform apply
+```
+
+To destroy resources:
+
+```bash
+terraform destroy
+```

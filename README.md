@@ -8,7 +8,7 @@ We currently support Amazon Web Services (AWS) Elastic Kubernetes Service (EKS);
 
 After provisioing a Kubernetes cluster, refer to the documentation for installing CPS1: [https://docs.cps1.tech](https://docs.cps1.tech)    
 
-## AWS EKS
+## AWS
 
 Module Overview:
 - An EKS cluster with a managed node group.
