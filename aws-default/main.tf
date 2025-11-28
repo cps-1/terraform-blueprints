@@ -44,12 +44,26 @@ data "aws_availability_zones" "available" {
   }
 }
 
+# This provider is required for ECR to autheticate with public repos.
+# Please note ECR authetication requires us-east-1 as region hence its
+# hardcoded below.
+provider "aws" {
+  alias  = "ecr"
+  region = "us-east-1"
+}
+
+data "aws_ecrpublic_authorization_token" "token" {
+  provider = aws.ecr
+}
+
 locals {
   name   = var.eks_cluster_name
   region = var.aws_region
 
   vpc_cidr = "10.0.0.0/16"
   azs      = slice(data.aws_availability_zones.available.names, 0, 2)
+
+  create_iam_policy = var.ack_enable_sns || var.ack_enable_sqs
 }
 
 ################################################################################
@@ -264,3 +278,134 @@ module "ebs_csi_driver_irsa" {
   }
 }
 
+################################################################################
+# External Resources for workspaces
+################################################################################
+
+module "eks_ack_addons" {
+  source = "aws-ia/eks-ack-addons/aws"
+
+  # Cluster Info
+  cluster_name      = module.eks.cluster_name
+  cluster_endpoint  = module.eks.cluster_endpoint
+  oidc_provider_arn = module.eks.oidc_provider_arn
+
+  # ECR Credentials
+  ecrpublic_username = data.aws_ecrpublic_authorization_token.token.user_name
+  ecrpublic_token    = data.aws_ecrpublic_authorization_token.token.password
+
+  # Controllers to enable
+  enable_sns                    = var.ack_enable_sns
+  enable_rds                    = var.ack_enable_rds
+  enable_sqs                    = var.ack_enable_sqs
+}
+
+resource "aws_db_subnet_group" "cps1eks" {
+  count = var.ack_enable_rds ? 1 : 0
+
+  name       = var.rds_subnet_group_name
+  subnet_ids = module.vpc.private_subnets
+}
+
+resource "aws_security_group" "cps1eksrds" {
+  count = var.ack_enable_rds ? 1 : 0
+
+  name        = "RDS Instances"
+  description = "RDS Instances with private access from CPS1 workspaces"
+  vpc_id      = module.vpc.vpc_id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "eksrdspg" {
+  count = var.ack_enable_rds ? 1 : 0
+
+  security_group_id = aws_security_group.cps1eksrds[0].id
+
+  ip_protocol                   = "tcp"
+  from_port                     = 5432
+  to_port                       = 5432
+  referenced_security_group_id  = module.eks.node_security_group_id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "eksrdsmysql" {
+  count = var.ack_enable_rds ? 1 : 0
+
+  security_group_id = aws_security_group.cps1eksrds[0].id
+
+  ip_protocol                   = "tcp"
+  from_port                     = 3306
+  to_port                       = 3306
+  referenced_security_group_id  = module.eks.node_security_group_id
+}
+
+data "aws_iam_policy_document" "cps1devpolicy" {
+  count = local.create_iam_policy ? 1 : 0
+
+  dynamic "statement" {
+    for_each = var.ack_enable_sns ? [1] : []
+
+    content {
+      sid       = "AllowSNSPublish"
+      effect    = "Allow"
+      actions   = ["sns:Publish"]
+      resources = ["arn:aws:sns:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.ack_enable_sqs ? [1] : []
+
+    content {
+      sid       = "AllowSQSManageMessages"
+      effect    = "Allow"
+      actions   = [
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes"
+      ]
+      resources = ["arn:aws:sqs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*"]
+    }
+  }
+}
+
+resource "aws_iam_policy" "cps1devpolicy" {
+  count = local.create_iam_policy ? 1 : 0
+
+  name        = "${var.eks_cluster_name}-workspace-policy"
+  description = "Policy for CPS1 Workspaces"
+  policy      = data.aws_iam_policy_document.cps1devpolicy[0].json
+}
+
+data "aws_iam_policy_document" "cps1workspaceirsa" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    effect  = "Allow"
+
+    principals {
+      type        = "Federated"
+      identifiers = [module.eks.oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "${replace(module.eks.oidc_provider_arn, "/^(.*provider/)/", "")}:sub"
+      # Allow any user namespace (u-*) default service account to perform the
+      # actions defined in the policies above
+      values   = ["system:serviceaccount:${var.cps1_user_namespace_prefix}*:default"]
+    }
+  }
+}
+
+resource "aws_iam_role" "cps1workspace" {
+  count = local.create_iam_policy ? 1 : 0
+
+  name               = "${var.eks_cluster_name}-workspace-role"
+  assume_role_policy = data.aws_iam_policy_document.cps1workspaceirsa.json
+}
+
+resource "aws_iam_role_policy_attachment" "cps1workspace" {
+  count = local.create_iam_policy ? 1 : 0
+
+  role       = aws_iam_role.cps1workspace[0].name
+  policy_arn = aws_iam_policy.cps1devpolicy[0].arn
+}
