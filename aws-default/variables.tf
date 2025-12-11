@@ -40,6 +40,12 @@ variable "ack_enable_sqs" {
   default     = false
 }
 
+variable "ack_enable_oss" {
+  description = "Create related resources spin up SQS Open Search Service domains in CPS1 managed environments"
+  type        = bool
+  default     = false
+}
+
 variable "cps1_user_namespace_prefix" {
   description = "The prefix for user namespaces in your CPS1 instance"
   type        = string
