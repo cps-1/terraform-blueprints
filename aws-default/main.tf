@@ -64,6 +64,7 @@ locals {
   azs      = slice(data.aws_availability_zones.available.names, 0, 2)
 
   create_iam_policy = var.ack_enable_sns || var.ack_enable_sqs
+  create_security_group = var.ack_enable_rds || var.ack_enable_oss
 }
 
 ################################################################################
@@ -298,20 +299,21 @@ module "eks_ack_addons" {
   enable_sns                    = var.ack_enable_sns
   enable_rds                    = var.ack_enable_rds
   enable_sqs                    = var.ack_enable_sqs
+  enable_opensearchservice      = var.ack_enable_oss
 }
 
 resource "aws_db_subnet_group" "cps1eks" {
-  count = var.ack_enable_rds ? 1 : 0
+  count = local.create_security_group ? 1 : 0
 
   name       = var.rds_subnet_group_name
   subnet_ids = module.vpc.private_subnets
 }
 
 resource "aws_security_group" "cps1eksrds" {
-  count = var.ack_enable_rds ? 1 : 0
+  count = local.create_security_group ? 1 : 0
 
-  name        = "RDS Instances"
-  description = "RDS Instances with private access from CPS1 workspaces"
+  name        = "CPS1 Workspaces"
+  description = "Services with private access from CPS1 workspaces"
   vpc_id      = module.vpc.vpc_id
 }
 
@@ -334,6 +336,17 @@ resource "aws_vpc_security_group_ingress_rule" "eksrdsmysql" {
   ip_protocol                   = "tcp"
   from_port                     = 3306
   to_port                       = 3306
+  referenced_security_group_id  = module.eks.node_security_group_id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "eksopensearchservice" {
+  count = var.ack_enable_oss ? 1 : 0
+
+  security_group_id = aws_security_group.cps1eksrds[0].id
+
+  ip_protocol                   = "tcp"
+  from_port                     = 443
+  to_port                       = 443
   referenced_security_group_id  = module.eks.node_security_group_id
 }
 

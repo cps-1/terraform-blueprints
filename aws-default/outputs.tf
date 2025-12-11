@@ -12,3 +12,8 @@ output "workspace_role_arn" {
   description = "ARN Role to use in workspaces' Service Account"
   value       = length(aws_iam_role.cps1workspace) > 0 ? aws_iam_role.cps1workspace[0].arn : null
 }
+
+output "private_subnets" {
+  description = "ARN Role to use in workspaces' Service Account"
+  value       = module.vpc.private_subnets
+}
