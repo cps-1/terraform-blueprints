@@ -143,6 +143,7 @@ module "eks_blueprints_addons" {
   create_delay_dependencies = [for group in module.eks.eks_managed_node_groups : group.node_group_arn]
 
   eks_addons = {
+    eks-pod-identity-agent = {}
     aws-ebs-csi-driver = {
       service_account_role_arn = module.ebs_csi_driver_irsa.iam_role_arn
     }
@@ -296,6 +297,7 @@ module "eks_ack_addons" {
   ecrpublic_token    = data.aws_ecrpublic_authorization_token.token.password
 
   # Controllers to enable
+  enable_eks                    = var.ack_enable_eks
   enable_sns                    = var.ack_enable_sns
   enable_rds                    = var.ack_enable_rds
   enable_sqs                    = var.ack_enable_sqs
@@ -389,8 +391,9 @@ resource "aws_iam_policy" "cps1devpolicy" {
   policy      = data.aws_iam_policy_document.cps1devpolicy[0].json
 }
 
-data "aws_iam_policy_document" "cps1workspaceirsa" {
+data "aws_iam_policy_document" "cps1workspace_assume_role" {
   statement {
+    sid     = "IRSA"
     actions = ["sts:AssumeRoleWithWebIdentity"]
     effect  = "Allow"
 
@@ -407,13 +410,24 @@ data "aws_iam_policy_document" "cps1workspaceirsa" {
       values   = ["system:serviceaccount:${var.cps1_user_namespace_prefix}*:default"]
     }
   }
+
+  statement {
+    sid     = "PodIdentity"
+    effect  = "Allow"
+    actions = ["sts:AssumeRole", "sts:TagSession"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["pods.eks.amazonaws.com"]
+    }
+  }
 }
 
 resource "aws_iam_role" "cps1workspace" {
   count = local.create_iam_policy ? 1 : 0
 
   name               = "${var.eks_cluster_name}-workspace-role"
-  assume_role_policy = data.aws_iam_policy_document.cps1workspaceirsa.json
+  assume_role_policy = data.aws_iam_policy_document.cps1workspace_assume_role.json
 }
 
 resource "aws_iam_role_policy_attachment" "cps1workspace" {
