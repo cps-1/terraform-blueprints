@@ -46,6 +46,12 @@ variable "ack_enable_oss" {
   default     = false
 }
 
+variable "ack_enable_eks" {
+  description = "Create related resources to configure the EKS cluster"
+  type        = bool
+  default     = false
+}
+
 variable "cps1_user_namespace_prefix" {
   description = "The prefix for user namespaces in your CPS1 instance"
   type        = string
